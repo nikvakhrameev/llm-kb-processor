@@ -1,0 +1,310 @@
+"""Ingest worker — mutates the wiki via claude-agent-sdk.
+
+Polls SQLite for approved resources, invokes Claude Agent SDK in an isolated
+environment, captures the report_result tool call, verifies git commits,
+and transitions resources to done or retries on failure.
+
+The ingest worker holds a process-wide asyncio lock so at most one ingest
+runs at a time, avoiding git races on the working tree.
+"""
+
+import asyncio
+import json
+import os
+import re
+import subprocess
+from pathlib import Path
+
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    HookMatcher,
+    AssistantMessage,
+    ResultMessage,
+    ToolUseBlock,
+    create_sdk_mcp_server,
+    query,
+    tool,
+)
+
+from app.db import Database
+from app.enums import ResourceStatus, ResourceType
+from app.models import Resource
+from app.notifier import notify_terminal
+from app.prompts import render_ingest, render_lint, render_synthesis
+from app.settings import settings
+from app.utils import utc_now_iso
+from app.workers.base import poll_loop
+
+# ------------------------------------------------------------------
+# MCP tool: report_result
+# ------------------------------------------------------------------
+
+REPORT_RESULT_SCHEMA = {
+    "status": str,         # "success" | "partial" | "failed"
+    "pages_created": list, # list[str], paths relative to kb_root
+    "pages_updated": list, # list[str]
+    "log_entry": str,      # one-line markdown bullet for log.md
+    "summary": str,        # 1-2 sentences for notification
+    "warnings": list,      # list[str]
+}
+
+
+@tool(
+    "report_result",
+    "Report final result of ingest. Call exactly once when finished.",
+    REPORT_RESULT_SCHEMA,
+)
+async def report_result(args: dict) -> dict:
+    """The worker captures this from the message stream, not the return value."""
+    return {"content": [{"type": "text", "text": "ack"}]}
+
+
+kb_ingest_mcp = create_sdk_mcp_server(
+    name="kb_ingest",
+    version="1.0.0",
+    tools=[report_result],
+)
+
+# ------------------------------------------------------------------
+# Bash hook — allowlist
+# ------------------------------------------------------------------
+
+ALLOWED_BASH_PATTERNS = [
+    r"^git status( -.+)?$",
+    r"^git diff( --cached)?( --stat)?( -- .+)?$",
+    r"^git add (-A|--all|[\w./\-_]+( [\w./\-_]+)*)$",
+    r"^git commit -m '[^']+'$",
+    r"^git log( --oneline)?( -n \d+)?$",
+    r"^git rev-parse HEAD$",
+    r"^ls( -la)?( [\w./\-_]+)?$",
+    r"^cat [\w./\-_]+$",
+    r"^wc -l [\w./\-_]+$",
+]
+
+
+async def bash_pre_hook(input_data, tool_use_id, context):
+    """Block any Bash command not in the allowlist."""
+    if input_data.get("tool_name") != "Bash":
+        return {}
+    cmd = (input_data.get("tool_input", {}) or {}).get("command", "").strip()
+    if any(re.match(p, cmd) for p in ALLOWED_BASH_PATTERNS):
+        return {}
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": f"Bash command not in allowlist: {cmd!r}",
+        }
+    }
+
+
+# ------------------------------------------------------------------
+# Git helpers
+# ------------------------------------------------------------------
+
+def _git(cmd: list[str], cwd: Path) -> str:
+    """Run a git command and return stripped stdout."""
+    result = subprocess.run(
+        ["git"] + cmd, cwd=cwd, check=True,
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip()
+
+
+def ensure_clean(repo: Path) -> str:
+    """Ensure the working tree is clean. Returns the current HEAD SHA.
+
+    If dirty, auto-commits as 'manual: pre-ingest snapshot'.
+    """
+    out = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=repo,
+        check=True, capture_output=True, text=True,
+    ).stdout
+    if out.strip():
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "manual: pre-ingest snapshot", "--no-verify"],
+            cwd=repo, check=True,
+        )
+    return _git(["rev-parse", "HEAD"], repo)
+
+
+def rollback(repo: Path, before_sha: str) -> None:
+    """Hard-reset the repo to a previous commit."""
+    subprocess.run(["git", "reset", "--hard", before_sha], cwd=repo, check=True)
+    subprocess.run(["git", "clean", "-fd"], cwd=repo, check=True)
+
+
+# ------------------------------------------------------------------
+# Ingest runner
+# ------------------------------------------------------------------
+
+_ingest_lock = asyncio.Lock()
+
+
+def _row_to_resource(row) -> Resource:
+    d = dict(row)
+    if "quality_gate_skipped" in d:
+        d["quality_gate_skipped"] = bool(d["quality_gate_skipped"])
+    return Resource(**d)
+
+
+async def run_ingest(db: Database, resource: Resource) -> dict | None:
+    """Run the Claude agent to ingest one resource.
+
+    Returns the report_result payload on success, or None on failure.
+    """
+    repo = settings.kb_root
+    before_sha = ensure_clean(repo)
+
+    # Build prompt
+    if resource.resource_type == ResourceType.LINT:
+        today = utc_now_iso()[:10]
+        prompt_text = render_lint(today)
+        commit_prefix = f"lint: {today}"
+        model = settings.deepseek_model
+        max_turns = settings.lint_max_turns
+    elif resource.resource_type == ResourceType.SYNTHESIS_WEEKLY:
+        # Compute ISO week
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
+        week_end = now.strftime("%Y-%m-%d")
+        iso_label = f"{now.year}-W{now.isocalendar().week:02d}"
+        prompt_text = render_synthesis(week_start, week_end, iso_label)
+        commit_prefix = f"synthesis: weekly {iso_label}"
+        model = settings.deepseek_model
+        max_turns = settings.synthesis_max_turns
+    else:
+        topics = json.loads(resource.quality_topics or "[]")
+        parsed_relpath = resource.parsed_text_path or ""
+        prompt_text = render_ingest(resource, parsed_relpath, topics)
+        commit_prefix = f"ingest: {resource.content_title or resource.short_id}"
+        model = settings.deepseek_model
+        max_turns = settings.ingest_max_turns
+
+    options = ClaudeAgentOptions(
+        cwd=str(repo),
+        system_prompt={"type": "preset", "preset": "claude_code"},
+        setting_sources=["project"],
+        permission_mode="acceptEdits",
+        allowed_tools=[
+            "Read", "Write", "Edit", "Grep", "Glob", "Bash",
+            "mcp__kb_ingest__report_result",
+        ],
+        mcp_servers={"kb_ingest": kb_ingest_mcp},
+        max_turns=max_turns,
+        model=model,
+        hooks={
+            "PreToolUse": [HookMatcher(matcher="Bash", hooks=[bash_pre_hook])],
+        },
+        env={
+            "ANTHROPIC_BASE_URL": settings.anthropic_base_url,
+            "ANTHROPIC_AUTH_TOKEN": settings.anthropic_auth_token,
+        },
+    )
+
+    report = None
+    final_result = None
+    try:
+        async with asyncio.timeout(settings.ingest_timeout_seconds):
+            async for msg in query(prompt=prompt_text, options=options):
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, ToolUseBlock) and \
+                           block.name == "mcp__kb_ingest__report_result":
+                            report = block.input
+                elif isinstance(msg, ResultMessage):
+                    final_result = msg
+    except asyncio.TimeoutError:
+        rollback(repo, before_sha)
+        return None
+
+    # Validate results
+    if report is None:
+        rollback(repo, before_sha)
+        return None
+
+    if final_result is None or final_result.is_error:
+        rollback(repo, before_sha)
+        return None
+
+    # Verify commit prefix
+    head_sha = _git(["rev-parse", "HEAD"], repo)
+    head_msg = _git(["log", "-1", "--format=%s"], repo)
+    if not head_msg.startswith(commit_prefix.split(":")[0] + ":"):
+        rollback(repo, before_sha)
+        return None
+
+    return {
+        **report,
+        "commit_sha": head_sha,
+        "cost_usd": final_result.total_cost_usd or 0.0,
+        "duration_ms": final_result.duration_ms or 0,
+    }
+
+
+# ------------------------------------------------------------------
+# Worker loop
+# ------------------------------------------------------------------
+
+async def handle_approved(db: Database) -> None:
+    """Poll for approved resources and process one at a time."""
+    rows = db.poll_resources([ResourceStatus.APPROVED])
+    if not rows:
+        return
+
+    row = rows[0]
+    resource = _row_to_resource(row)
+    rid = resource.id
+
+    try:
+        db.transition(rid, ResourceStatus.APPROVED, ResourceStatus.INGESTING)
+    except RuntimeError:
+        return  # CAS race
+
+    async with _ingest_lock:
+        try:
+            result = await run_ingest(db, resource)
+        except Exception as e:
+            ok = db.schedule_retry(rid, ResourceStatus.APPROVED, str(e),
+                                   max_retries=settings.retries_max,
+                                   backoff_base_seconds=settings.retry_backoff_base_seconds)
+            if not ok:
+                db.transition(rid, ResourceStatus.INGESTING, ResourceStatus.FAILED,
+                              error_message=f"ingest failed after retries: {e}")
+                notify_terminal(db, rid)
+            return
+
+    if result is None:
+        # Agent failed — retry
+        ok = db.schedule_retry(rid, ResourceStatus.APPROVED, "agent did not complete",
+                               max_retries=settings.retries_max,
+                               backoff_base_seconds=settings.retry_backoff_base_seconds)
+        if not ok:
+            db.transition(rid, ResourceStatus.INGESTING, ResourceStatus.FAILED,
+                          error_message="agent did not call report_result after retries")
+            notify_terminal(db, rid)
+        return
+
+    # Success
+    db.transition(
+        rid, ResourceStatus.INGESTING, ResourceStatus.DONE,
+        ingest_commit_sha=result.get("commit_sha", ""),
+        ingest_summary=json.dumps({
+            "pages_created": result.get("pages_created", []),
+            "pages_updated": result.get("pages_updated", []),
+            "warnings": result.get("warnings", []),
+        }),
+        ingest_log_entry=result.get("log_entry", ""),
+    )
+    notify_terminal(db, rid)
+
+
+async def run_ingest_worker() -> None:
+    """Entry point for the ingest worker."""
+    db = Database(settings.state_db)
+    db.connect()
+    db.run_migrations()
+    await poll_loop(db, handle_approved, settings.poll_interval_seconds,
+                    name="ingest-worker")

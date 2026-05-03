@@ -1,0 +1,33 @@
+# Secrets
+.env
+
+# SQLite
+state.db
+state.db-wal
+state.db-shm
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Wiki repo (separate git repo, not tracked here)
+knowledge_base/
+
+# Logs
+logs/
+*.log
+
+# Ruff
+.ruff_cache/
+
+# Mypy
+.mypy_cache/
