@@ -1,0 +1,40 @@
+# All four long-lived processes share one image, one .env, and the same two
+# bind mounts: a host directory holding state.db (+ WAL/SHM siblings) and the
+# llm-kb-wiki git repo.
+#
+# Override paths and image tag via .env:
+#   IMAGE          — full image reference, e.g. ghcr.io/<owner>/llm-kb:<sha>
+#   STATE_DB_DIR   — host directory containing state.db (mounted at /data)
+#   WIKI_DIR       — host path to the llm-kb-wiki repo (mounted at /wiki)
+
+x-app: &app
+  image: ${IMAGE:-llm-kb:local}
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    STATE_DB: /data/state.db
+    KB_ROOT: /wiki
+  volumes:
+    - ${STATE_DB_DIR:-./data}:/data
+    - ${WIKI_DIR:-./llm-kb-wiki}:/wiki
+
+services:
+  bot:
+    <<: *app
+    container_name: llm-kb-bot
+    command: python -m app.bot
+
+  resources:
+    <<: *app
+    container_name: llm-kb-resources
+    command: python -m app.worker_resources
+
+  ingest:
+    <<: *app
+    container_name: llm-kb-ingest
+    command: python -m app.worker_ingest
+
+  scheduler:
+    <<: *app
+    container_name: llm-kb-scheduler
+    command: python -m app.scheduler

@@ -9,7 +9,6 @@ class ResourceType(StrEnum):
     MD = "md"
     YOUTUBE = "youtube"
     TEXT = "text"
-    VOICE = "voice"
     LINT = "_lint"
     SYNTHESIS_WEEKLY = "_synthesis_weekly"
 

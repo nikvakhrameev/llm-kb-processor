@@ -14,7 +14,6 @@ I accept and process:
 • PDF documents — attached as files
 • Markdown files — .md or .markdown
 • Plain text — messages of 50+ characters
-• Voice messages — transcribed to text
 
 Supported commands:
 /start — show this message

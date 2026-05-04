@@ -3,7 +3,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS resources (
     id                       TEXT PRIMARY KEY,        -- UUIDv4
-    resource_type            TEXT NOT NULL,           -- web|pdf|md|youtube|text|voice|_lint|_synthesis_weekly
+    resource_type            TEXT NOT NULL,           -- web|pdf|md|youtube|text|_lint|_synthesis_weekly
     status                   TEXT NOT NULL,           -- received|parsing|parsed|gating|approved|rejected|ingesting|done|failed
 
     -- Telegram metadata (NULL for system rows like _lint)

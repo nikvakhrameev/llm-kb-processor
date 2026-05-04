@@ -20,7 +20,7 @@ router = Router()
 MIN_TEXT_LEN = 50
 UNSUPPORTED_REPLY = (
     "Unsupported message type. I accept: PDF, MD, web URLs, "
-    "YouTube URLs, text (50+ chars), and voice messages."
+    "YouTube URLs, and text (50+ chars)."
 )
 
 YOUTUBE_HOSTS = {
@@ -32,12 +32,8 @@ YOUTUBE_HOSTS = {
 def detect_type(message: Message) -> ResourceType | None:
     """Detect the resource type from an incoming Telegram message.
 
-    Order of checks: voice → document → text with URLs → plain text.
-    First match wins.
+    Order of checks: document → text with URLs → plain text. First match wins.
     """
-    if message.voice is not None:
-        return ResourceType.VOICE
-
     if message.document is not None:
         mime = message.document.mime_type or ""
         name = (message.document.file_name or "").lower()
@@ -65,10 +61,7 @@ def detect_type(message: Message) -> ResourceType | None:
 
 async def _download(message: Message, resource_id: str, bot: Bot) -> str | None:
     """Download an attachment. Returns the relative path (from kb_root) or None."""
-    if message.voice:
-        file = await bot.get_file(message.voice.file_id)
-        ext = ".ogg"
-    elif message.document:
+    if message.document:
         file = await bot.get_file(message.document.file_id)
         original_name = message.document.file_name or ""
         ext = Path(original_name).suffix.lower() or ".bin"
@@ -111,25 +104,6 @@ async def _insert_and_reply(
         await message.reply(f"queued for processing (id `{short}`)", parse_mode="Markdown")
     finally:
         db.close()
-
-
-# ------------------------------------------------------------------
-# Voice
-# ------------------------------------------------------------------
-
-@router.message(lambda msg: msg.voice is not None)
-async def on_voice(message: Message, bot: Bot) -> None:
-    rtype = detect_type(message)
-    if rtype is None:
-        await message.reply(UNSUPPORTED_REPLY)
-        return
-    rid = uuid_str()
-    try:
-        path = await _download(message, rid, bot)
-    except Exception as e:
-        await message.reply(f"Could not download attachment: {e}")
-        return
-    await _insert_and_reply(message, rtype, resource_id=rid, original_file_path=path)
 
 
 # ------------------------------------------------------------------

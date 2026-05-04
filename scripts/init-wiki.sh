@@ -13,7 +13,7 @@ WIKI_ROOT="$(cd "$WIKI_ROOT" && pwd)"
 echo "Initializing knowledge base at: $WIKI_ROOT"
 
 # Create directory structure
-mkdir -p "$WIKI_ROOT"/{raw/{inbox,parsed/{web,pdf,youtube,text,voice},rejected},wiki/{entities,concepts,sources,syntheses/{weekly,lint,topics}}}
+mkdir -p "$WIKI_ROOT"/{raw/{inbox,parsed/{web,pdf,youtube,text},rejected},wiki/{entities,concepts,sources,syntheses/{weekly,lint,topics}}}
 
 # Create purpose.md
 cat > "$WIKI_ROOT/purpose.md" << 'PURPOSE_EOF'
@@ -28,7 +28,6 @@ software engineering practices.
 - Long-form essays on AI and software engineering
 - Conference talks and lectures (YouTube transcripts)
 - Research papers (PDFs)
-- Voice notes with technical ideas or questions
 
 ## Out of scope
 - News headlines without lasting value
@@ -72,7 +71,7 @@ raw/inbox/              Original attachments, read-only
 ```markdown
 ---
 resource_id: <uuid>
-resource_type: web|pdf|youtube|text|voice|md
+resource_type: web|pdf|youtube|text|md
 source_url: <url or null>
 title: "<title>"
 ingested_at: <ISO-8601>

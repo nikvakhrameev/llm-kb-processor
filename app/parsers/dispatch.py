@@ -5,7 +5,6 @@ from app.parsers.base import Parser, ParseError
 from app.parsers.md import parse_md
 from app.parsers.pdf import parse_pdf
 from app.parsers.text import parse_text
-from app.parsers.voice import parse_voice
 from app.parsers.web import parse_web
 from app.parsers.youtube import parse_youtube
 
@@ -15,7 +14,6 @@ PARSERS: dict[ResourceType, Parser] = {
     ResourceType.PDF: parse_pdf,
     ResourceType.MD: parse_md,
     ResourceType.TEXT: parse_text,
-    ResourceType.VOICE: parse_voice,
 }
 
 

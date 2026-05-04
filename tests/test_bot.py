@@ -58,7 +58,6 @@ def test_is_youtube_music():
 def make_message(**kwargs) -> MagicMock:
     """Create a mock aiogram Message."""
     msg = MagicMock()
-    msg.voice = kwargs.get("voice")
     msg.document = kwargs.get("document")
     msg.text = kwargs.get("text")
     return msg
@@ -69,11 +68,6 @@ def make_document(mime_type="", file_name="") -> MagicMock:
     doc.mime_type = mime_type
     doc.file_name = file_name
     return doc
-
-
-def test_detect_voice():
-    msg = make_message(voice=MagicMock())
-    assert detect_type(msg) == ResourceType.VOICE
 
 
 def test_detect_pdf_by_mime():
@@ -126,6 +120,6 @@ def test_detect_multiple_urls():
 
 
 def test_detect_photo():
-    msg = make_message()  # no voice, doc, or text
+    msg = make_message()  # no doc or text
     # Simulate a photo by having no matching fields
     assert detect_type(msg) is None

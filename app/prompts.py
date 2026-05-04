@@ -17,8 +17,8 @@ contains coherent, useful content that is worth integrating into the wiki.
 
 You score on a scale of 0-100:
 - 0-30: garbage. Parsing artifacts (cookie banners, JS errors, paywalls),
-  pure noise, error pages, scanned PDFs that produced gibberish, voice notes
-  that are silence or background noise, music videos with auto-caption noise.
+  pure noise, error pages, scanned PDFs that produced gibberish, music
+  videos with auto-caption noise.
 - 30-60: marginal. Real content but very short, off-topic for this owner,
   or duplicative of common knowledge with no specific insight.
 - 60-80: useful. Coherent content with at least some substance the owner

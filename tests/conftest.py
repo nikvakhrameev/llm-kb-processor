@@ -35,7 +35,7 @@ def tmp_wiki(tmp_path: Path) -> Path:
     wiki = tmp_path / "kb"
     wiki.mkdir()
     for sub in ["raw/inbox", "raw/parsed/web", "raw/parsed/pdf", "raw/parsed/youtube",
-                "raw/parsed/text", "raw/parsed/voice", "raw/rejected",
+                "raw/parsed/text", "raw/rejected",
                 "wiki/entities", "wiki/concepts", "wiki/sources",
                 "wiki/syntheses/weekly", "wiki/syntheses/lint"]:
         (wiki / sub).mkdir(parents=True)

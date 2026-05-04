@@ -1,0 +1,36 @@
+# VCS
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+# Local state — must be mounted, not baked into the image
+state.db
+state.db-shm
+state.db-wal
+.env
+
+# Local wiki — mounted at runtime
+llm-kb-wiki
+
+# Editor / OS
+.idea
+.vscode
+.DS_Store
+
+# Tests / docs not needed at runtime
+tests
+docs
+docker
+*.md
+!app/CLAUDE.md
+!app/**/CLAUDE.md
