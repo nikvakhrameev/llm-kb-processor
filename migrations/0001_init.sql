@@ -1,7 +1,7 @@
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
-CREATE TABLE resources (
+CREATE TABLE IF NOT EXISTS resources (
     id                       TEXT PRIMARY KEY,        -- UUIDv4
     resource_type            TEXT NOT NULL,           -- web|pdf|md|youtube|text|voice|_lint|_synthesis_weekly
     status                   TEXT NOT NULL,           -- received|parsing|parsed|gating|approved|rejected|ingesting|done|failed
@@ -44,14 +44,14 @@ CREATE TABLE resources (
     completed_at             TEXT
 );
 
-CREATE INDEX idx_resources_status_attempt
+CREATE INDEX IF NOT EXISTS idx_resources_status_attempt
     ON resources (status, next_attempt_at, created_at);
 
-CREATE INDEX idx_resources_telegram
+CREATE INDEX IF NOT EXISTS idx_resources_telegram
     ON resources (telegram_chat_id, telegram_message_id);
 
 -- Append-only audit log of state transitions and notable events
-CREATE TABLE events (
+CREATE TABLE IF NOT EXISTS events (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     resource_id   TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
     event_type    TEXT NOT NULL,           -- status_change|parser_error|gate_result|ingest_result|notify_sent|...
@@ -59,9 +59,9 @@ CREATE TABLE events (
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_events_resource ON events (resource_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_resource ON events (resource_id, created_at);
 
 -- Lightweight Telegram-message-id deduplication
-CREATE UNIQUE INDEX idx_resources_tg_unique
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resources_tg_unique
     ON resources (telegram_chat_id, telegram_message_id)
     WHERE telegram_message_id IS NOT NULL;

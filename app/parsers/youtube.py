@@ -2,19 +2,17 @@
 
 import asyncio
 import json
-import subprocess
 from pathlib import Path
 
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
 
 from app.models import Resource
-from app.parsers.base import ParseError, ParseResult, write_parsed
+from app.parsers.base import ParseError, TransientParseError, ParseResult, write_parsed
 from app.utils import extract_video_id
 
 
 async def parse_youtube(resource: Resource, kb_root: Path) -> ParseResult:
-    """Extract transcript and metadata from a YouTube video."""
     if not resource.source_url:
         raise ParseError("no source URL")
 
@@ -23,13 +21,14 @@ async def parse_youtube(resource: Resource, kb_root: Path) -> ParseResult:
         raise ParseError(f"could not extract video ID from {resource.source_url}")
 
     try:
-        transcript = await asyncio.to_thread(
-            YouTubeTranscriptApi.get_transcript, video_id, languages=["en", "ru"]
+        fetched = await asyncio.to_thread(
+            lambda: YouTubeTranscriptApi().fetch(video_id, languages=["en", "ru"])
         )
+        transcript = fetched.to_raw_data()
     except (TranscriptsDisabled, NoTranscriptFound) as e:
         raise ParseError(f"no transcript available: {e}")
     except Exception as e:
-        raise ParseError(f"transcript fetch failed: {e}")
+        raise TransientParseError(f"transcript fetch failed: {e}")
 
     body = format_transcript(transcript)
     metadata = await fetch_metadata(resource.source_url)
@@ -50,7 +49,6 @@ async def parse_youtube(resource: Resource, kb_root: Path) -> ParseResult:
 
 
 def format_transcript(transcript: list[dict], segment_interval_s: int = 30) -> str:
-    """Group transcript segments into timestamped paragraphs."""
     paragraphs: list[str] = []
     current: list[str] = []
     current_start = 0.0
@@ -87,8 +85,6 @@ def format_timestamp(seconds: float) -> str:
 
 
 async def fetch_metadata(url: str) -> dict:
-    """Fetch video metadata via yt-dlp in info-only mode."""
-
     async def _run() -> dict:
         try:
             proc = await asyncio.create_subprocess_exec(

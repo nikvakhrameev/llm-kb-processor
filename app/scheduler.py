@@ -91,6 +91,9 @@ async def run_scheduler() -> None:
             await asyncio.sleep(60)
     except (KeyboardInterrupt, asyncio.CancelledError):
         scheduler.shutdown(wait=False)
+        if _db:
+            _db.close()
+            print("[scheduler] Database connection closed")
 
 
 if __name__ == "__main__":

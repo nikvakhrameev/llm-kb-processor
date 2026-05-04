@@ -9,6 +9,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Message, Update
 
 from app.db import Database
+from app.handlers.commands import router as commands_router
 from app.handlers.messages import router as messages_router
 from app.handlers.start import router as start_router
 from app.handlers.status import router as status_router
@@ -38,12 +39,19 @@ async def run_bot() -> None:
     if not settings.allowed_user_ids:
         print("[bot] WARNING: ALLOWED_USER_IDS is empty. No users can interact.")
 
+    db = Database(settings.state_db)
+    db.connect()
+    db.run_migrations()
+    db.close()
+    print("[bot] Migrations applied.")
+
     bot = Bot(token=settings.telegram_bot_token)
 
     dp = Dispatcher()
     dp.update.middleware.register(auth_middleware)
     dp.include_router(start_router)
     dp.include_router(status_router)
+    dp.include_router(commands_router)
     dp.include_router(messages_router)
 
     print("[bot] Starting Telegram polling...")

@@ -20,6 +20,8 @@ Supported commands:
 /start — show this message
 /status — view recent resources
 /status <id> — view a specific resource
+/lint — enqueue a daily lint job
+/synthesis — enqueue a weekly synthesis job
 
 Send a single URL or file per message. Processing is asynchronous — you'll get a notification when it's done."""  # noqa: E501
 

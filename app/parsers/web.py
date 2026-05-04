@@ -6,17 +6,20 @@ from urllib.parse import urlparse
 import trafilatura
 
 from app.models import Resource
-from app.parsers.base import ParseError, ParseResult, write_parsed
+from app.parsers.base import ParseError, TransientParseError, ParseResult, write_parsed
 
 
 async def parse_web(resource: Resource, kb_root) -> ParseResult:
-    """Fetch and extract clean markdown from a web page."""
     if not resource.source_url:
         raise ParseError("no source URL")
 
-    downloaded = await asyncio.to_thread(
-        trafilatura.fetch_url, resource.source_url, no_ssl=False
-    )
+    try:
+        downloaded = await asyncio.to_thread(
+            trafilatura.fetch_url, resource.source_url, no_ssl=False
+        )
+    except Exception as e:
+        raise TransientParseError(f"network fetch failed: {e}")
+
     if not downloaded:
         raise ParseError(f"could not fetch {resource.source_url}")
 

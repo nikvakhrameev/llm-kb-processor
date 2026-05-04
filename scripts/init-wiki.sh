@@ -226,7 +226,7 @@ per-theme synthesis with citations, open questions, and reading list.
 CLAUDE_EOF
 
 # Create index.md
-cat > "$WIKI_ROOT/index.md" << 'INDEX_EOF'
+cat > "$WIKI_ROOT/index.md" << INDEX_EOF
 # Index
 
 _Last updated: $(date -u +%Y-%m-%d)_

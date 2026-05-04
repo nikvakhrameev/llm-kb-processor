@@ -16,8 +16,10 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
 
     # --- Anthropic / DeepSeek via claude-agent-sdk ---
-    anthropic_base_url: str = "https://api.deepseek.com/v1"
+    anthropic_base_url: str = "https://api.deepseek.com/v1/antropic"
     anthropic_auth_token: str = ""
+    claude_agent_pro_model: str = "deepseek-v4-pro"
+    claude_agent_small_model: str = "deepseek-v4-flash"
 
     # --- Telegram ---
     telegram_bot_token: str = ""

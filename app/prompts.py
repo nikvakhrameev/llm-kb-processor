@@ -95,7 +95,7 @@ Your task:
    claims with proper citation back to wiki/sources/<slug>.md.
 7. Update index.md with new pages.
 8. Append a one-line entry to log.md.
-9. git add and git commit with prefix "ingest: <slug>".
+9. git add and git commit with prefix "ingest: <slug>". DO NOT ADD ANYTHING ELSE TO COMMIT MESSAGE OR DESCRIPTION.
 10. Call the report_result tool exactly once with your final summary.
 
 Constraints:
@@ -156,7 +156,7 @@ Output:
    - Comment out dangling wikilinks (do not delete the line).
    - Tag flagged pages with an HTML comment <!-- lint:<finding-type> -->
      near the top.
-3. git add and git commit with prefix "lint: <YYYY-MM-DD>".
+3. git add and git commit with prefix "lint: <YYYY-MM-DD>". DO NOT ADD ANYTHING ELSE TO COMMIT MESSAGE OR DESCRIPTION.
 4. Call report_result with status, the digest path under pages_created,
    any pages_updated, a one-line log_entry for log.md, a Telegram-friendly
    summary (1-2 sentences citing the largest finding categories), and any
@@ -200,7 +200,7 @@ Output:
 2. Update relevant entity/concept pages: add a "Mentioned in syntheses"
    bullet with a wikilink to this synthesis, where the connection is
    substantive.
-3. git add and git commit with prefix "synthesis: weekly {iso_week_label}".
+3. git add and git commit with prefix "synthesis: weekly {iso_week_label}". DO NOT ADD ANYTHING ELSE TO COMMIT MESSAGE OR DESCRIPTION.
 4. Call report_result with status, pages_created including this synthesis,
    pages_updated, log_entry, summary (the theme + 1 sentence on what was
    notable), and warnings.

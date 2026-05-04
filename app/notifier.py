@@ -49,11 +49,15 @@ async def notify_terminal(db: Database, resource_id: str) -> None:
         created = len(summary_data.get("pages_created", []))
         updated = len(summary_data.get("pages_updated", []))
         warnings = summary_data.get("warnings", [])
-        warn_suffix = f"\n  {len(warnings)} warning(s)" if warnings else ""
+        if warnings:
+            warn_lines = "\n".join(f"  • {w}" for w in warnings)
+            warn_suffix = f"\n  {len(warnings)} warning(s):\n{warn_lines}"
+        else:
+            warn_suffix = ""
         text = (
             f"Ingested\n"
             f"\"{title}\"\n"
-            f"+{created} pages, {updated} updates{ warn_suffix}\n"
+            f"+{created} pages, {updated} updates{warn_suffix}\n"
             f"ID: `{short_id}`"
         )
     elif status == "rejected":
@@ -72,22 +76,22 @@ async def notify_terminal(db: Database, resource_id: str) -> None:
 
     # Try Telegram notification
     bot = _get_bot()
-    if bot:
-        chat_id = row["telegram_chat_id"] or settings.owner_chat_id
-        message_id = row["telegram_message_id"]
-        try:
-            if message_id and chat_id:
-                await bot.send_message(
-                    chat_id=chat_id, text=text,
-                    reply_to_message_id=message_id,
-                    parse_mode="Markdown",
-                )
-            elif chat_id:
-                await bot.send_message(
-                    chat_id=chat_id, text=text, parse_mode="Markdown",
-                )
-        except Exception as e:
-            print(f"[notifier] Telegram send failed: {e}")
+    chat_id = row["telegram_chat_id"] or settings.owner_chat_id
+    message_id = row["telegram_message_id"]
+    try:
+        if message_id and chat_id:
+            await bot.send_message(
+                chat_id=chat_id, text=text,
+                reply_to_message_id=message_id,
+                parse_mode="Markdown",
+            )
+        elif chat_id:
+            await bot.send_message(
+                chat_id=chat_id, text=text, parse_mode="Markdown",
+            )
+    except Exception as e:
+        print(f"[notifier] Telegram send failed: {e}")
+        return  # don't set notification_sent_at — will retry
 
     db.execute(
         """UPDATE resources

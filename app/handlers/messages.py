@@ -87,6 +87,7 @@ async def _insert_and_reply(
     message: Message,
     rtype: ResourceType,
     *,
+    resource_id: str | None = None,
     source_url: str | None = None,
     original_file_path: str | None = None,
     inline_text: str | None = None,
@@ -95,7 +96,7 @@ async def _insert_and_reply(
     db = Database(settings.state_db)
     db.connect()
     try:
-        rid = uuid_str()
+        rid = resource_id or uuid_str()
         db.insert_resource(
             id=rid,
             resource_type=rtype,
@@ -122,12 +123,13 @@ async def on_voice(message: Message, bot: Bot) -> None:
     if rtype is None:
         await message.reply(UNSUPPORTED_REPLY)
         return
+    rid = uuid_str()
     try:
-        path = await _download(message, uuid_str(), bot)
+        path = await _download(message, rid, bot)
     except Exception as e:
         await message.reply(f"Could not download attachment: {e}")
         return
-    await _insert_and_reply(message, rtype, original_file_path=path)
+    await _insert_and_reply(message, rtype, resource_id=rid, original_file_path=path)
 
 
 # ------------------------------------------------------------------
@@ -140,12 +142,13 @@ async def on_document(message: Message, bot: Bot) -> None:
     if rtype is None:
         await message.reply(UNSUPPORTED_REPLY)
         return
+    rid = uuid_str()
     try:
-        path = await _download(message, uuid_str(), bot)
+        path = await _download(message, rid, bot)
     except Exception as e:
         await message.reply(f"Could not download attachment: {e}")
         return
-    await _insert_and_reply(message, rtype, original_file_path=path)
+    await _insert_and_reply(message, rtype, resource_id=rid, original_file_path=path)
 
 
 # ------------------------------------------------------------------

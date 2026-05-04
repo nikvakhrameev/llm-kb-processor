@@ -40,12 +40,12 @@ from app.workers.base import poll_loop
 # ------------------------------------------------------------------
 
 REPORT_RESULT_SCHEMA = {
-    "status": str,         # "success" | "partial" | "failed"
-    "pages_created": list, # list[str], paths relative to kb_root
-    "pages_updated": list, # list[str]
-    "log_entry": str,      # one-line markdown bullet for log.md
-    "summary": str,        # 1-2 sentences for notification
-    "warnings": list,      # list[str]
+    "status": str,  # "success" | "partial" | "failed"
+    "pages_created": list,  # list[str], paths relative to kb_root
+    "pages_updated": list,  # list[str]
+    "log_entry": str,  # one-line markdown bullet for log.md
+    "summary": str,  # 1-2 sentences for notification
+    "warnings": list,  # list[str]
 }
 
 
@@ -69,16 +69,13 @@ kb_ingest_mcp = create_sdk_mcp_server(
 # Bash hook — allowlist
 # ------------------------------------------------------------------
 
+# Safe git subcommands — read-only or revertable, no history rewrite, no remotes.
+# Args are unrestricted: the agent runs in an isolated container scoped to the wiki repo.
+_SAFE_GIT = r"^git (status|diff|log|show|add|commit|branch|rev-parse|rev-list|ls-files|ls-tree|cat-file|describe|tag|notes|blame)( .*)?$"
+
 ALLOWED_BASH_PATTERNS = [
-    r"^git status( -.+)?$",
-    r"^git diff( --cached)?( --stat)?( -- .+)?$",
-    r"^git add (-A|--all|[\w./\-_]+( [\w./\-_]+)*)$",
-    r"^git commit -m '[^']+'$",
-    r"^git log( --oneline)?( -n \d+)?$",
-    r"^git rev-parse HEAD$",
-    r"^ls( -la)?( [\w./\-_]+)?$",
-    r"^cat [\w./\-_]+$",
-    r"^wc -l [\w./\-_]+$",
+    _SAFE_GIT,
+    r"^(ls|cat|wc|find|grep|head|tail)( .*)?$",
 ]
 
 
@@ -180,8 +177,9 @@ async def run_ingest(db: Database, resource: Resource) -> dict | None:
         parsed_relpath = resource.parsed_text_path or ""
         prompt_text = render_ingest(resource, parsed_relpath, topics)
         commit_prefix = f"ingest: {resource.content_title or resource.short_id}"
-        model = settings.deepseek_model
+        model = settings.claude_agent_pro_model
         max_turns = settings.ingest_max_turns
+
 
     options = ClaudeAgentOptions(
         cwd=str(repo),
@@ -201,31 +199,43 @@ async def run_ingest(db: Database, resource: Resource) -> dict | None:
         env={
             "ANTHROPIC_BASE_URL": settings.anthropic_base_url,
             "ANTHROPIC_AUTH_TOKEN": settings.anthropic_auth_token,
+            "ANTHROPIC_SMALL_FAST_MODEL": settings.claude_agent_small_model,
         },
     )
 
     report = None
     final_result = None
     try:
-        async with asyncio.timeout(settings.ingest_timeout_seconds):
-            async for msg in query(prompt=prompt_text, options=options):
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, ToolUseBlock) and \
-                           block.name == "mcp__kb_ingest__report_result":
-                            report = block.input
-                elif isinstance(msg, ResultMessage):
-                    final_result = msg
+        stream = query(prompt=prompt_text, options=options).__aiter__()
+        while True:
+            try:
+                msg = await asyncio.wait_for(
+                    stream.__anext__(),
+                    timeout=settings.ingest_timeout_seconds,
+                )
+            except StopAsyncIteration:
+                break
+            print(f"received msg from claude agent: {msg}")
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, ToolUseBlock) and \
+                            block.name == "mcp__kb_ingest__report_result":
+                        report = block.input
+            elif isinstance(msg, ResultMessage):
+                final_result = msg
     except asyncio.TimeoutError:
+        print(f"timeout waiting for next message from claude agent, rolling back")
         rollback(repo, before_sha)
         return None
 
     # Validate results
     if report is None:
+        print(f"no report message found in claude agent, rolling back")
         rollback(repo, before_sha)
         return None
 
     if final_result is None or final_result.is_error:
+        print(f"final result contains error status {final_result}, rolling back")
         rollback(repo, before_sha)
         return None
 
@@ -233,8 +243,7 @@ async def run_ingest(db: Database, resource: Resource) -> dict | None:
     head_sha = _git(["rev-parse", "HEAD"], repo)
     head_msg = _git(["log", "-1", "--format=%s"], repo)
     if not head_msg.startswith(commit_prefix.split(":")[0] + ":"):
-        rollback(repo, before_sha)
-        return None
+        print(f"resulted commit has wrong format {head_msg}")
 
     return {
         **report,
@@ -250,7 +259,10 @@ async def run_ingest(db: Database, resource: Resource) -> dict | None:
 
 async def handle_approved(db: Database) -> None:
     """Poll for approved resources and process one at a time."""
+    print(f"fetch resource with status {ResourceStatus.APPROVED}")
     rows = db.poll_resources([ResourceStatus.APPROVED])
+    print(f"fetched {len(rows)} rows")
+
     if not rows:
         return
 
@@ -273,18 +285,17 @@ async def handle_approved(db: Database) -> None:
             if not ok:
                 db.transition(rid, ResourceStatus.INGESTING, ResourceStatus.FAILED,
                               error_message=f"ingest failed after retries: {e}")
-                notify_terminal(db, rid)
+                await notify_terminal(db, rid)
             return
 
     if result is None:
-        # Agent failed — retry
         ok = db.schedule_retry(rid, ResourceStatus.APPROVED, "agent did not complete",
                                max_retries=settings.retries_max,
                                backoff_base_seconds=settings.retry_backoff_base_seconds)
         if not ok:
             db.transition(rid, ResourceStatus.INGESTING, ResourceStatus.FAILED,
                           error_message="agent did not call report_result after retries")
-            notify_terminal(db, rid)
+            await notify_terminal(db, rid)
         return
 
     # Success
@@ -298,13 +309,16 @@ async def handle_approved(db: Database) -> None:
         }),
         ingest_log_entry=result.get("log_entry", ""),
     )
-    notify_terminal(db, rid)
+    await notify_terminal(db, rid)
 
 
 async def run_ingest_worker() -> None:
     """Entry point for the ingest worker."""
     db = Database(settings.state_db)
-    db.connect()
-    db.run_migrations()
-    await poll_loop(db, handle_approved, settings.poll_interval_seconds,
-                    name="ingest-worker")
+    try:
+        db.connect()
+        db.run_migrations()
+        await poll_loop(db, handle_approved, settings.poll_interval_seconds,
+                        name="ingest-worker")
+    finally:
+        db.close()
