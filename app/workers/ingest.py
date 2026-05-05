@@ -376,7 +376,12 @@ def ensure_wiki_repo(repo: Path, ssh_env: dict) -> None:
         )
     print(f"cloning {remote} into {repo}")
     repo.parent.mkdir(parents=True, exist_ok=True)
-    _git(["clone", remote, str(repo)], repo.parent, extra_env=ssh_env)
+    try:
+        _git(["clone", remote, str(repo)], repo.parent, extra_env=ssh_env)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"git clone failed (exit {e.returncode}): {e.stderr.strip()}"
+        ) from e
 
 
 async def run_ingest_worker() -> None:
