@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     tz: str = "Europe/Berlin"
 
     # --- Git ---
+    kb_git_remote: str = ""
     kb_git_autopush: bool = False
     kb_git_ssh_key: str = ""
 

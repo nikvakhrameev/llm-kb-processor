@@ -365,10 +365,26 @@ async def handle_approved(db: Database, ssh_env: dict) -> None:
     await notify_terminal(db, rid)
 
 
+def ensure_wiki_repo(repo: Path, ssh_env: dict) -> None:
+    """Clone the wiki repo if kb_root is not a git repository."""
+    if (repo / ".git").is_dir():
+        return
+    remote = settings.kb_git_remote
+    if not remote:
+        raise RuntimeError(
+            f"KB_ROOT ({repo}) is not a git repository and KB_GIT_REMOTE is not set"
+        )
+    print(f"cloning {remote} into {repo}")
+    repo.parent.mkdir(parents=True, exist_ok=True)
+    _git(["clone", remote, str(repo)], repo.parent, extra_env=ssh_env)
+
+
 async def run_ingest_worker() -> None:
     """Entry point for the ingest worker."""
-    db = Database(settings.state_db)
     ssh_env = _git_ssh_env()
+    ensure_wiki_repo(settings.kb_root, ssh_env)
+
+    db = Database(settings.state_db)
 
     async def _handler(db: Database) -> None:
         await handle_approved(db, ssh_env)
