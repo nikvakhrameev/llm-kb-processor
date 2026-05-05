@@ -1,10 +1,15 @@
 # Secrets
 .env
+.env.docker
 
 # SQLite
-state.db
-state.db-wal
-state.db-shm
+db
+db/state.db
+db/state.db-wal
+db/state.db-shm
+
+ssh
+tmp
 
 # Python
 __pycache__/

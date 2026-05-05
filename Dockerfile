@@ -14,6 +14,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   build-essential — fallback for any wheel without prebuilt binaries
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
+        openssh-client \
         curl \
         ca-certificates \
         build-essential \

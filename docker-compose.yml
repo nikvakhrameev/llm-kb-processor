@@ -8,15 +8,15 @@
 #   WIKI_DIR       — host path to the llm-kb-wiki repo (mounted at /wiki)
 
 x-app: &app
-  image: ${IMAGE:-llm-kb:local}
+  image: ${IMAGE}
   restart: unless-stopped
-  env_file: .env
+  env_file: .env.docker
   environment:
     STATE_DB: /data/state.db
     KB_ROOT: /wiki
   volumes:
-    - ${STATE_DB_DIR:-./data}:/data
-    - ${WIKI_DIR:-./llm-kb-wiki}:/wiki
+    - ${STATE_DB_DIR}:/data
+    - ${WIKI_DIR}:/wiki
 
 services:
   bot:
@@ -34,7 +34,8 @@ services:
     container_name: llm-kb-ingest
     command: python -m app.worker_ingest
 
-  scheduler:
-    <<: *app
-    container_name: llm-kb-scheduler
-    command: python -m app.scheduler
+  # disabled for now
+  #scheduler:
+  #  <<: *app
+  #  container_name: llm-kb-scheduler
+  #  command: python -m app.scheduler

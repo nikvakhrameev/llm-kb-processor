@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """All configuration parameters for the knowledge base system."""
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     # --- DeepSeek (quality gate) ---
     deepseek_api_key: str = ""
@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     owner_chat_id: int = 0
 
     # --- Paths ---
-    kb_root: Path = Path("/Users/nikita.vakhrameev/Projects/llm-kb-wiki")
-    state_db: Path = Path("/Users/nikita.vakhrameev/Projects/llm-kb/state.db")
+    kb_root: Path = Path("")
+    state_db: Path = Path("")
 
     # --- Tuning ---
     poll_interval_seconds: int = 2
@@ -50,8 +50,8 @@ class Settings(BaseSettings):
     tz: str = "Europe/Berlin"
 
     # --- Git ---
-    kb_git_remote: str = ""
     kb_git_autopush: bool = False
+    kb_git_ssh_key: str = ""
 
 
 settings = Settings()

@@ -14,10 +14,14 @@ venv
 .ruff_cache
 
 # Local state — must be mounted, not baked into the image
-state.db
-state.db-shm
-state.db-wal
+db/state.db
+db/state.db-shm
+db/state.db-wal
 .env
+.env.docker
+
+ssh
+tmp
 
 # Local wiki — mounted at runtime
 llm-kb-wiki

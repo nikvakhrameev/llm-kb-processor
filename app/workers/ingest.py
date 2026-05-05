@@ -9,6 +9,7 @@ runs at a time, avoiding git races on the working tree.
 """
 
 import asyncio
+import base64
 import json
 import os
 import re
@@ -99,20 +100,65 @@ async def bash_pre_hook(input_data, tool_use_id, context):
 # Git helpers
 # ------------------------------------------------------------------
 
-def _git(cmd: list[str], cwd: Path) -> str:
+_SSH_KEY_PATH = Path.cwd() / "tmp" / "git-ssh-key"
+
+
+def _git_ssh_env() -> dict:
+    """Return env dict with GIT_SSH_COMMAND if an SSH key is configured.
+
+    The key is stored base64-encoded in settings so it survives env-file
+    round-trips without escaping issues.
+    """
+    key_b64 = settings.kb_git_ssh_key
+    if not key_b64:
+        return {}
+    try:
+        key = base64.b64decode(key_b64).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise ValueError(f"KB_GIT_SSH_KEY is not valid base64-encoded UTF-8: {e}") from e
+    _SSH_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _SSH_KEY_PATH.write_text(key)
+    _SSH_KEY_PATH.chmod(0o600)
+    return {"GIT_SSH_COMMAND": f"ssh -i {_SSH_KEY_PATH} -o StrictHostKeyChecking=accept-new"}
+
+
+def _git(cmd: list[str], cwd: Path, extra_env: dict | None = None) -> str:
     """Run a git command and return stripped stdout."""
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
     result = subprocess.run(
         ["git"] + cmd, cwd=cwd, check=True,
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
     return result.stdout.strip()
 
 
-def ensure_clean(repo: Path) -> str:
-    """Ensure the working tree is clean. Returns the current HEAD SHA.
+def _git_pull(repo: Path, ssh_env: dict) -> None:
+    """Pull latest changes from the configured remote."""
+    branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], repo)
+    print(f"pulling origin/{branch} into {repo}")
+    _git(["pull", "origin", branch], repo, extra_env=ssh_env)
+
+
+def _git_push(repo: Path, ssh_env: dict) -> None:
+    """Push current branch to the configured remote."""
+    branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], repo)
+    print(f"pushing to origin/{branch}")
+    _git(["push", "origin", branch], repo, extra_env=ssh_env)
+
+
+def ensure_clean(repo: Path, ssh_env: dict | None = None) -> str:
+    """Pull latest, then snapshot dirty tree. Returns the current HEAD SHA.
 
     If dirty, auto-commits as 'manual: pre-ingest snapshot'.
     """
+    if ssh_env:
+        try:
+            _git_pull(repo, ssh_env)
+        except subprocess.CalledProcessError as e:
+            print(f"git pull failed (continuing anyway): {e.stderr}")
+
     out = subprocess.run(
         ["git", "status", "--porcelain"], cwd=repo,
         check=True, capture_output=True, text=True,
@@ -146,13 +192,13 @@ def _row_to_resource(row) -> Resource:
     return Resource(**d)
 
 
-async def run_ingest(db: Database, resource: Resource) -> dict | None:
+async def run_ingest(db: Database, resource: Resource, ssh_env: dict) -> dict | None:
     """Run the Claude agent to ingest one resource.
 
     Returns the report_result payload on success, or None on failure.
     """
     repo = settings.kb_root
-    before_sha = ensure_clean(repo)
+    before_sha = ensure_clean(repo, ssh_env)
 
     # Build prompt
     if resource.resource_type == ResourceType.LINT:
@@ -245,6 +291,13 @@ async def run_ingest(db: Database, resource: Resource) -> dict | None:
     if not head_msg.startswith(commit_prefix.split(":")[0] + ":"):
         print(f"resulted commit has wrong format {head_msg}")
 
+    # Push if configured
+    if settings.kb_git_autopush and ssh_env:
+        try:
+            _git_push(repo, ssh_env)
+        except subprocess.CalledProcessError as e:
+            print(f"git push failed: {e.stderr}")
+
     return {
         **report,
         "commit_sha": head_sha,
@@ -257,7 +310,7 @@ async def run_ingest(db: Database, resource: Resource) -> dict | None:
 # Worker loop
 # ------------------------------------------------------------------
 
-async def handle_approved(db: Database) -> None:
+async def handle_approved(db: Database, ssh_env: dict) -> None:
     """Poll for approved resources and process one at a time."""
     print(f"fetch resource with status {ResourceStatus.APPROVED}")
     rows = db.poll_resources([ResourceStatus.APPROVED])
@@ -277,7 +330,7 @@ async def handle_approved(db: Database) -> None:
 
     async with _ingest_lock:
         try:
-            result = await run_ingest(db, resource)
+            result = await run_ingest(db, resource, ssh_env)
         except Exception as e:
             ok = db.schedule_retry(rid, ResourceStatus.APPROVED, str(e),
                                    max_retries=settings.retries_max,
@@ -315,10 +368,15 @@ async def handle_approved(db: Database) -> None:
 async def run_ingest_worker() -> None:
     """Entry point for the ingest worker."""
     db = Database(settings.state_db)
+    ssh_env = _git_ssh_env()
+
+    async def _handler(db: Database) -> None:
+        await handle_approved(db, ssh_env)
+
     try:
         db.connect()
         db.run_migrations()
-        await poll_loop(db, handle_approved, settings.poll_interval_seconds,
+        await poll_loop(db, _handler, settings.poll_interval_seconds,
                         name="ingest-worker")
     finally:
         db.close()
