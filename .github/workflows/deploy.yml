@@ -45,7 +45,7 @@ jobs:
             DEEPSEEK_MODEL=deepseek-v4-flash
 
             # --- claude-agent-sdk pointed at DeepSeek ---
-            ANTHROPIC_BASE_URL=https://api.deepseek.com/v1/antropic
+            ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
             ANTHROPIC_AUTH_TOKEN=${{ secrets.DEEPSEEK_API_KEY }}
             CLAUDE_AGENT_PRO_MODEL=deepseek-v4-pro
             CLAUDE_AGENT_SMALL_MODEL=deepseek-v4-flash
